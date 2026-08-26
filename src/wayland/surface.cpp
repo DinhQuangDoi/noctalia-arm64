@@ -676,6 +676,13 @@ bool Surface::prepareBlurEffect() {
   return true;
 }
 
+bool Surface::supportsBlurRegion() const noexcept {
+  if (m_backgroundEffect != nullptr) {
+    return true;
+  }
+  return m_connection.backgroundEffectManager() != nullptr;
+}
+
 void Surface::setBlurRegion(const std::vector<InputRect>& rects) {
   if (!prepareBlurEffect()) {
     return;
