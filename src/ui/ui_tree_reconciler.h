@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +36,13 @@ namespace ui {
     // is set for high-frequency streams (slider drag, input typing) where only
     // the latest value matters.
     struct ControlCallback {
+      struct PointerContext {
+        float x = 0.0F;
+        float y = 0.0F;
+        std::uint32_t serial = 0;
+        std::uint32_t time = 0;
+      };
+
       explicit ControlCallback(
           std::string fnName, std::string firstArg = {}, std::string secondArg = {}, bool coalesceStream = false
       )
@@ -43,6 +52,7 @@ namespace ui {
       std::string arg1;
       std::string arg2;
       bool coalesce = false;
+      std::optional<PointerContext> pointerContext;
     };
     using CallbackSink = std::function<void(const ControlCallback& callback)>;
     // Resolves a tree-supplied path (e.g. image source) to an absolute path.
@@ -60,8 +70,10 @@ namespace ui {
     void setCallbackSink(CallbackSink sink) { m_sink = std::move(sink); }
     void setPathResolver(PathResolver resolver) { m_resolver = std::move(resolver); }
     void setFocusRequestSink(FocusRequestSink sink) { m_focusSink = std::move(sink); }
-    // Content scale multiplied into size-like props (fonts, gaps, sizes, radii).
+    // Content scale multiplied into size-like props (gaps, sizes, radii).
     void setScale(float scale);
+    // Additional multiplier applied only to text sizes.
+    void setFontScale(float scale);
     // Host text defaults for label/glyph props the tree leaves unset, so
     // declarative text matches the host's imperative text (e.g. the bar's
     // per-widget font family/weight). Empty family = renderer-global font.
@@ -109,6 +121,7 @@ namespace ui {
     PathResolver m_resolver;
     FocusRequestSink m_focusSink;
     float m_scale = 1.0F;
+    float m_fontScale = 1.0F;
     std::string m_defaultFontFamily;
     FontWeight m_defaultFontWeight; // initialized in the ctor (opaque enum here)
     bool m_compactControls = false;

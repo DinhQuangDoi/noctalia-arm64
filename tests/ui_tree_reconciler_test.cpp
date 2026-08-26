@@ -21,6 +21,7 @@
 #include "ui/ui_tree_reconciler.h"
 
 #include <cstdlib>
+#include <optional>
 #include <print>
 #include <string>
 #include <utility>
@@ -247,13 +248,15 @@ int main() {
     }
   }
 
-  // Scale multiplies size-like props.
+  // Content scale affects every size-like prop; font scale affects text only.
   {
     ui::UiTreeReconciler reconciler;
     reconciler.setScale(2.0f);
+    reconciler.setFontScale(1.5f);
     Flex host;
 
     ui::UiTreeNode tree = makeNode("column");
+    tree.props.emplace("gap", 4.0);
     ui::UiTreeNode label = makeLabel("S");
     label.props.emplace("fontSize", 10.0);
     tree.children.push_back(label);
@@ -261,7 +264,8 @@ int main() {
 
     auto* column = dynamic_cast<Flex*>(host.children().front().get());
     auto* scaled = column != nullptr ? dynamic_cast<Label*>(column->children()[0].get()) : nullptr;
-    ok = expect(scaled != nullptr && scaled->fontSize() == 20.0f, "fontSize scaled by content scale") && ok;
+    ok = expect(scaled != nullptr && scaled->fontSize() == 30.0f, "fontSize includes the text-only scale") && ok;
+    ok = expect(column != nullptr && column->gap() == 8.0f, "font scale does not affect spacing") && ok;
   }
 
   // Button onClick routes through the callback sink.
@@ -283,6 +287,43 @@ int main() {
     ok = expect(control != nullptr, "button built") && ok;
     // The sink wiring is exercised via the reconciler-installed callback.
     ok = expect(fired.empty(), "sink not fired before click") && ok;
+  }
+
+  // A declarative button's right-click callback carries host-only pointer
+  // metadata so a native popup can use the exact originating event.
+  {
+    ui::UiTreeReconciler reconciler;
+    std::optional<ui::UiTreeReconciler::ControlCallback> fired;
+    reconciler.setCallbackSink([&fired](const ui::UiTreeReconciler::ControlCallback& callback) { fired = callback; });
+    Flex host;
+
+    ui::UiTreeNode tree = makeNode("column");
+    ui::UiTreeNode button = makeNode("button");
+    button.props.emplace("text", std::string("Menu"));
+    button.props.emplace("onRightClick", std::string("openMenu"));
+    tree.children.push_back(button);
+    (void)reconciler.reconcile(host, tree, renderer);
+
+    auto* column = dynamic_cast<Flex*>(host.children().front().get());
+    auto* control = column != nullptr ? dynamic_cast<Button*>(column->children()[0].get()) : nullptr;
+    ok = expect(control != nullptr && control->inputArea() != nullptr, "right-click button built") && ok;
+    if (control != nullptr && control->inputArea() != nullptr) {
+      control->setSize(100.0F, 40.0F);
+      control->layout(renderer);
+      control->inputArea()->dispatchPress(5.0F, 6.0F, BTN_RIGHT, true, 25.0F, 30.0F, 77, 90);
+      control->inputArea()->dispatchPress(5.0F, 6.0F, BTN_RIGHT, false, 25.0F, 30.0F, 78, 91);
+    }
+    ok = expect(fired.has_value() && fired->fn == "openMenu", "right click should reach its callback") && ok;
+    ok = expect(
+             fired.has_value()
+                 && fired->pointerContext.has_value()
+                 && fired->pointerContext->x == 25.0F
+                 && fired->pointerContext->y == 30.0F
+                 && fired->pointerContext->serial == 77
+                 && fired->pointerContext->time == 90,
+             "right click should preserve scene coordinates, serial, and time"
+         )
+        && ok;
   }
 
   // The global button-border style updates existing buttons and preserves custom widths.

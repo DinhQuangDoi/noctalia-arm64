@@ -76,6 +76,10 @@ public:
   // Returns false when the plugin is unknown, disabled, or exposes no settings.
   [[nodiscard]] bool openToPlugin(std::string pluginId);
   void close();
+  // Closes the window for a widget editor while preserving the active section for its return.
+  void closeForWidgetEditor();
+  // Reopens the section saved by closeForWidgetEditor(), if any.
+  void reopenAfterWidgetEditor();
   [[nodiscard]] bool isOpen() const noexcept { return m_surface != nullptr && m_surface->isRunning(); }
   [[nodiscard]] wl_surface* wlSurface() const noexcept {
     return m_surface != nullptr ? m_surface->wlSurface() : nullptr;
@@ -233,6 +237,8 @@ private:
   bool m_pluginListDirty = true;
   bool m_pluginListRefreshInFlight = false;
   std::uint64_t m_pluginListRefreshGeneration = 0;
+  // Plugin catalog scroll state outlives both the store sheet and its async file callbacks.
+  ScrollViewState m_pluginStoreScrollState;
   scripting::PluginFileCache m_pluginFileCache;
   RenderContext* m_renderContext = nullptr;
   DependencyService* m_dependencies = nullptr;
@@ -328,6 +334,7 @@ private:
   std::string m_selectedBarName;
   std::string m_selectedMonitorOverride;
   std::string m_selectedSection;
+  std::string m_reopenAfterWidgetEditorSection;
   std::string m_statusMessage;
   std::string m_pendingResetPageScope;
   std::vector<std::vector<std::string>> m_pendingResetSettingPaths;

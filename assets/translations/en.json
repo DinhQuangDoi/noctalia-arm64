@@ -184,6 +184,7 @@
     "audio": {
       "application-volumes": "Application Volumes",
       "choose-effects-profile": "Choose a profile",
+      "default-device": "Default device",
       "effects-profile": "Effects",
       "input-device-prefix": "Input",
       "no-application-audio": "No Application Audio",
@@ -305,6 +306,22 @@
     },
     "power": {
       "battery": "Battery",
+      "charging": {
+        "configured": "Configured: {limits}",
+        "display-only": "Display only",
+        "error-denied": "Authorization was denied. Charge thresholds were not changed.",
+        "error-failed": "Charge thresholds could not be changed.",
+        "externally-managed": "Set by another tool. Configure UPower to manage charge thresholds.",
+        "firmware-managed": "Charging is managed by system firmware",
+        "full-charge": "Can charge to 100%",
+        "starts": "Starts below {start}%",
+        "starts-stops": "Starts below {start}% · Stops at {end}%",
+        "stops": "Stops at {end}%",
+        "title": "Battery charging",
+        "unreadable": "Unavailable",
+        "unsupported": "Charge thresholds are not supported",
+        "use-thresholds": "Use charge thresholds"
+      },
       "design-capacity": "Of design capacity",
       "health": "Battery Health",
       "performance-inhibited": "Performance unavailable",
@@ -579,6 +596,7 @@
         "grid": "Grid"
       },
       "title": "Desktop Widgets",
+      "title-lockscreen": "Lockscreen Widgets",
       "types": {
         "audio-visualizer": "Audio Visualizer",
         "button": "Button",
@@ -1376,6 +1394,13 @@
       "panel-position": {
         "auto": "Follow Bar"
       },
+      "plugins": {
+        "auto-update": {
+          "all": "All sources",
+          "none": "None",
+          "official": "Official only"
+        }
+      },
       "screen-position": {
         "bottom-center": "Bottom Center",
         "bottom-left": "Bottom Left",
@@ -1760,6 +1785,10 @@
         "font-family": {
           "description": "Typeface for this bar's widgets; leave empty to inherit the global font (per-widget Font Family overrides this)",
           "label": "Font Family"
+        },
+        "font-scale": {
+          "description": "Scale factor for text across all widgets on this bar; per-widget font_scale multiplies this",
+          "label": "Font Scale"
         },
         "font-weight": {
           "description": "Default weight for widget labels on this bar.",
@@ -3458,6 +3487,10 @@
           "description": "Typeface for this widget; leave empty to inherit the bar font",
           "label": "Font Family"
         },
+        "font-scale": {
+          "description": "Scale multiplier for text in this widget, independent of the widget's overall scale",
+          "label": "Font Scale"
+        },
         "font-weight": {
           "description": "Default inherits the bar font weight",
           "label": "Font Weight"
@@ -3520,6 +3553,10 @@
         "hide-when-full": {
           "description": "Hide the battery widget when fully charged",
           "label": "Hide When Full"
+        },
+        "hide-when-inactive": {
+          "description": "Hide the microphone widget while no application is capturing audio",
+          "label": "Hide When Inactive"
         },
         "hide-when-no-connected-device": {
           "description": "Hide the Bluetooth widget when no device is connected",
@@ -3755,6 +3792,10 @@
         "show-num-lock": {
           "description": "Show Num Lock state",
           "label": "Show Num Lock"
+        },
+        "show-progress": {
+          "description": "Fill the widget background to show playback progress",
+          "label": "Show Playback Progress"
         },
         "show-scroll-lock": {
           "description": "Show Scroll Lock state",

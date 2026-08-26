@@ -19,6 +19,7 @@
 #include "core/toml.h"
 #include "scripting/plugin_id.h"
 
+#include <algorithm>
 #include <optional>
 #include <print>
 #include <set>
@@ -230,6 +231,7 @@ location = "https://example.invalid/bad"
     bar.panelOverlap = 2;
     bar.capsuleThickness = 0.5f;
     bar.scale = 2.0f;
+    bar.fontScale = 1.5f;
     bar.fontWeight = 600;
     bar.fontFamily = "Inter";
     bar.startWidgets = {"launcher"};
@@ -294,6 +296,7 @@ location = "https://example.invalid/bad"
     ovr.panelOverlap = -1;
     ovr.capsuleThickness = 0.25f;
     ovr.scale = 1.5f;
+    ovr.fontScale = 1.5f;
     ovr.fontFamily = "Fira Sans";
     ovr.startWidgets = std::vector<std::string>{"tray"};
     ovr.centerWidgets = std::vector<std::string>{"media"};
@@ -405,8 +408,8 @@ location = "https://example.invalid/bad"
     c.brightness.enableDdcutil = true;
     c.brightness.ddcutilIgnoreMmids = {"ABC123"};
     c.brightness.monitorOverrides = {
-        {"DP-1", BrightnessBackendPreference::Ddcutil},
-        {"eDP-1", std::nullopt},
+        {"DP-1", BrightnessBackendPreference::Ddcutil, std::nullopt, 7},
+        {"eDP-1", std::nullopt, "intel_backlight", std::nullopt},
     };
     c.battery.warningThreshold = 15;
     c.battery.deviceThresholds = {{"BAT0", 10}, {"hidpp:1", 25}};
@@ -558,7 +561,7 @@ location = "https://example.invalid/bad"
          .location = "https://github.com/noctalia-dev/official-plugins"},
     };
     c.plugins.enabled = {"noctalia/notes"};
-    c.plugins.autoUpdate = false; // non-default (default is true) so the round-trip exercises it
+    c.plugins.autoUpdate = PluginAutoUpdateMode::None; // non-default (default is All) so the round-trip exercises it
 
     c.bars = {makeProbeBar()};
     return c;
@@ -596,6 +599,16 @@ location = "https://example.invalid/bad"
         fail("osd.scale clamp: expected 0.5");
       }
     }
+    // Bar font_scale uses the same lower bound exposed by the Settings slider.
+    {
+      auto t = toml::parse("font_scale = 0.1");
+      BarConfig b{};
+      Diagnostics d;
+      readInto(t, b, barFieldsSchema(), "bar", d);
+      if (b.fontScale != 0.2f) {
+        fail("bar.font_scale clamp: expected 0.2");
+      }
+    }
     // Clipboard history count accepts large text-heavy histories but still has
     // an explicit config ceiling.
     {
@@ -606,6 +619,146 @@ location = "https://example.invalid/bad"
       if (s.clipboardHistoryMaxEntries != 10000) {
         fail("shell.clipboard_history_max_entries clamp: expected 10000");
       }
+    }
+  }
+
+  void checkMonitorFontScaleChangeSet() {
+    Config before;
+    BarConfig bar;
+    bar.name = "default";
+    BarMonitorOverride monitor;
+    monitor.match = "DP-1";
+    bar.monitorOverrides.push_back(monitor);
+    before.bars.push_back(bar);
+
+    Config after = before;
+    after.bars.front().monitorOverrides.front().fontScale = 1.5F;
+    if (!computeConfigChangeSet(before, after).bars) {
+      fail("monitor font_scale override did not mark bars changed");
+    }
+  }
+
+  std::pair<PluginsConfig, Diagnostics> parsePlugins(std::string_view config) {
+    PluginsConfig plugins;
+    Diagnostics diagnostics;
+    const toml::table root = toml::parse(config);
+    readInto(root, plugins, pluginsSchema(), "plugins", diagnostics);
+    return {std::move(plugins), std::move(diagnostics)};
+  }
+
+  void checkPluginAutoUpdateMode() {
+    const auto erroredOnAutoUpdate = [](const Diagnostics& diag) {
+      return std::ranges::any_of(diag.entries, [](const auto& entry) {
+        return entry.severity == Diagnostics::Severity::Error && entry.path == "plugins.auto_update";
+      });
+    };
+
+    // Cases: config snippet, expected mode
+    const auto cases = {
+        std::pair{"auto_update = \"all\"", PluginAutoUpdateMode::All},
+        std::pair{"auto_update = \"official\"", PluginAutoUpdateMode::Official},
+        std::pair{"auto_update = \"none\"", PluginAutoUpdateMode::None},
+    };
+    for (const auto& [text, expected] : cases) {
+      const auto [plugins, diag] = parsePlugins(text);
+      if (plugins.autoUpdate != expected || diag.hasErrors()) {
+        fail(
+            std::string("plugins.auto_update: '")
+            + text
+            + "' should parse to "
+            + std::string(enumToKey(kPluginAutoUpdateModes, expected))
+        );
+      }
+    }
+    // Unknown strings, unsupported types, and the legacy boolean form error
+    // and leave the default in place.
+    for (const auto text :
+         {"auto_update = \"sometimes\"", "auto_update = 1.5", "auto_update = true", "auto_update = false"}) {
+      const auto [plugins, diag] = parsePlugins(text);
+      if (plugins.autoUpdate != PluginAutoUpdateMode::All || !erroredOnAutoUpdate(diag)) {
+        fail(std::string("plugins.auto_update: '") + text + "' should error and keep the default");
+      }
+    }
+  }
+
+  void checkAutoUpdateScopeSelection() {
+    // The official scope matches by name AND location: a user-added source that
+    // reuses the "official" name is not the official source.
+    const std::vector<PluginSourceConfig> sources = {
+        defaultPluginSources()[0], // the official source
+        {.kind = PluginSourceKind::Git,
+         .name = "community",
+         .location = "https://github.com/noctalia-dev/community-plugins"},
+        {.kind = PluginSourceKind::Git,
+         .name = "disabled",
+         .location = "https://example.invalid/disabled",
+         .enabled = false},
+        {.kind = PluginSourceKind::Path, .name = "local", .location = "/tmp/plugins"},
+    };
+    const auto expectLocations = [](std::string_view fixtureName, const std::vector<PluginSourceConfig>& fixture,
+                                    PluginAutoUpdateMode mode, std::vector<std::string_view> locations) {
+      std::vector<std::string_view> selected;
+      for (const auto& source : fixture) {
+        if (sourceInAutoUpdateScope(source, mode)) {
+          selected.push_back(source.location);
+        }
+      }
+      if (!std::ranges::equal(selected, locations)) {
+        fail(
+            "auto-update scope ("
+            + std::string(fixtureName)
+            + "): unexpected sources selected for "
+            + std::string(enumToKey(kPluginAutoUpdateModes, mode))
+        );
+      }
+    };
+    expectLocations("defaults", sources, PluginAutoUpdateMode::None, {});
+    expectLocations(
+        "defaults", sources, PluginAutoUpdateMode::Official, {"https://github.com/noctalia-dev/official-plugins"}
+    );
+    // Every enabled git source; disabled and path sources stay out.
+    expectLocations(
+        "defaults", sources, PluginAutoUpdateMode::All,
+        {"https://github.com/noctalia-dev/official-plugins", "https://github.com/noctalia-dev/community-plugins"}
+    );
+    // A single source reusing the "official" name with an untrusted location is
+    // legal config (names must be unique, locations need not), but the location
+    // check must keep it out of the official scope.
+    const std::vector<PluginSourceConfig> untrustedOfficial = {
+        {.kind = PluginSourceKind::Git, .name = "official", .location = "https://example.invalid/untrusted"},
+        {.kind = PluginSourceKind::Git,
+         .name = "community",
+         .location = "https://github.com/noctalia-dev/community-plugins"},
+    };
+    expectLocations("untrustedOfficial", untrustedOfficial, PluginAutoUpdateMode::Official, {});
+    expectLocations(
+        "untrustedOfficial", untrustedOfficial, PluginAutoUpdateMode::All,
+        {"https://example.invalid/untrusted", "https://github.com/noctalia-dev/community-plugins"}
+    );
+  }
+
+  void checkDuplicatePluginSourceRejection() {
+    const auto erroredOnSource = [](const Diagnostics& diag) {
+      return std::ranges::any_of(diag.entries, [](const auto& entry) {
+        return entry.severity == Diagnostics::Severity::Error && entry.path == "plugins.source";
+      });
+    };
+    // Legit official source first: the duplicate is dropped, the legit entry kept.
+    const auto [legitPlugins, legitDiag] = parsePlugins(R"(
+[[source]]
+name = "official"
+kind = "git"
+location = "https://github.com/noctalia-dev/official-plugins"
+
+[[source]]
+name = "official"
+kind = "git"
+location = "https://example.invalid/untrusted"
+)");
+    if (!erroredOnSource(legitDiag)
+        || legitPlugins.sources.size() != 1
+        || legitPlugins.sources[0].location != "https://github.com/noctalia-dev/official-plugins") {
+      fail("plugins.source: duplicate names must error and keep the first entry");
     }
   }
 
@@ -849,6 +1002,7 @@ contact_shadow = true
 enabled = false
 end = [ "battery" ]
 font_family = "Inter"
+font_scale = 1.5
 font_weight = 600
 hover_highlight = false
 icon_color = "#0C0B0A"
@@ -906,6 +1060,7 @@ widget_spacing = 8
     enabled = true
     end = [ "volume" ]
     font_family = "Fira Sans"
+    font_scale = 1.5
     font_weight = 600
     hover_highlight = true
     icon_color = "#E3E2E1"
@@ -1067,6 +1222,10 @@ widget_spacing = 8
   checkStorageKeySourceValidation();
   checkPanelFloatingLayerValidation();
   checkClamps();
+  checkMonitorFontScaleChangeSet();
+  checkPluginAutoUpdateMode();
+  checkAutoUpdateScopeSelection();
+  checkDuplicatePluginSourceRejection();
   checkCustomColorFallback();
   checkTemplateConfigCustomColorsExport();
 

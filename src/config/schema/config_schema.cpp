@@ -421,19 +421,8 @@ namespace noctalia::config::schema {
       static const Schema<BrightnessMonitorOverride> s = {
           field(&BrightnessMonitorOverride::match, "match"),
           optionalEnumField(&BrightnessMonitorOverride::backend, "backend", kBrightnessBackendPreferences),
-          custom<BrightnessMonitorOverride>(
-              "backlight_device",
-              [](const toml::table& tbl, BrightnessMonitorOverride& out, std::string_view, Diagnostics&) {
-                if (auto v = tbl["backlight_device"].value<std::string>()) {
-                  out.backlightDevice = *v;
-                }
-              },
-              [](toml::table& tbl, const BrightnessMonitorOverride& in) {
-                if (in.backlightDevice.has_value()) {
-                  tbl.insert_or_assign("backlight_device", *in.backlightDevice);
-                }
-              }
-          ),
+          field(&BrightnessMonitorOverride::backlightDevice, "backlight_device"),
+          field(&BrightnessMonitorOverride::ddcBus, "ddc_bus"),
       };
       return s;
     }
@@ -536,7 +525,27 @@ namespace noctalia::config::schema {
             [](const PluginSourceConfig& src) { return isValidPluginSourceName(src.name); }
         ),
         field(&PluginsConfig::enabled, "enabled"),
-        field(&PluginsConfig::autoUpdate, "auto_update"),
+        // auto_update accepts only "all"|"official"|"none"
+        custom<PluginsConfig>(
+            "auto_update",
+            [](const toml::table& tbl, PluginsConfig& out, std::string_view parentPath, Diagnostics& diag) {
+              if (auto v = tbl["auto_update"].value<std::string>()) {
+                const std::string trimmed = StringUtils::trim(*v);
+                if (auto parsed = enumFromKey(kPluginAutoUpdateModes, trimmed)) {
+                  out.autoUpdate = *parsed;
+                } else {
+                  diag.error(
+                      joinPath(parentPath, "auto_update"), "unknown value \"" + *v + "\"; expected all|official|none"
+                  );
+                }
+              } else if (tbl.contains("auto_update")) {
+                diag.error(joinPath(parentPath, "auto_update"), "expected all|official|none");
+              }
+            },
+            [](toml::table& tbl, const PluginsConfig& in) {
+              tbl.insert_or_assign("auto_update", std::string(enumToKey(kPluginAutoUpdateModes, in.autoUpdate)));
+            }
+        ),
         finalize<PluginsConfig>([](PluginsConfig& plugins, std::string_view parentPath, Diagnostics& diag) {
           for (auto it = plugins.enabled.begin(); it != plugins.enabled.end();) {
             if (scripting::isValidPluginId(*it)) {
@@ -545,6 +554,19 @@ namespace noctalia::config::schema {
             }
             diag.warn(joinPath(parentPath, "enabled"), "invalid plugin id \"" + *it + "\"; expected author/plugin");
             it = plugins.enabled.erase(it);
+          }
+          // Duplicate names would share one checkout on disk: keep the first, error on the rest.
+          std::unordered_set<std::string> seen;
+          for (auto it = plugins.sources.begin(); it != plugins.sources.end();) {
+            if (seen.insert(it->name).second) {
+              ++it;
+              continue;
+            }
+            diag.error(
+                joinPath(parentPath, "source"),
+                "duplicate plugin source name \"" + it->name + "\"; source names must be unique"
+            );
+            it = plugins.sources.erase(it);
           }
         }),
     };
@@ -1950,24 +1972,8 @@ namespace noctalia::config::schema {
       );
     }
 
-    template <typename Struct>
-    Field<Struct> optionalStringField(std::optional<std::string> Struct::* member, std::string_view key) {
-      return custom<Struct>(
-          key,
-          [member, key](const toml::table& tbl, Struct& out, std::string_view, Diagnostics&) {
-            if (auto v = tbl[key].value<std::string>()) {
-              out.*member = *v;
-            }
-          },
-          [member, key](toml::table& tbl, const Struct& in) {
-            if ((in.*member).has_value()) {
-              tbl.insert_or_assign(key, *(in.*member));
-            }
-          }
-      );
-    }
-
-    // Like optionalStringField but trims; a present-but-empty value stays unset so it inherits the parent.
+    // Like field(std::optional<std::string>…) but trims; a present-but-empty value stays unset so it inherits the
+    // parent.
     template <typename Struct>
     Field<Struct> optionalTrimmedStringField(std::optional<std::string> Struct::* member, std::string_view key) {
       return custom<Struct>(
@@ -2196,6 +2202,7 @@ namespace noctalia::config::schema {
         field(&BarConfig::panelOverlap, "panel_overlap", kBarPanelOverlapRange),
         field(&BarConfig::capsuleThickness, "capsule_thickness", kBarCapsuleThicknessRange),
         field(&BarConfig::scale, "scale", kBarScaleRange),
+        field(&BarConfig::fontScale, "font_scale", kBarFontScaleRange),
         field(&BarConfig::fontWeight, "font_weight"),
         optionalTrimmedStringField(&BarConfig::fontFamily, "font_family"),
         field(&BarConfig::startWidgets, "start"),
@@ -2224,7 +2231,7 @@ namespace noctalia::config::schema {
   const Schema<BarMonitorOverride>& barMonitorOverrideSchema() {
     static const Schema<BarMonitorOverride> s = {
         field(&BarMonitorOverride::match, "match"),
-        optionalStringField(&BarMonitorOverride::position, "position"),
+        field(&BarMonitorOverride::position, "position"),
         optionalBoolField(&BarMonitorOverride::enabled, "enabled"),
         optionalBoolField(&BarMonitorOverride::autoHide, "auto_hide"),
         optionalBoolField(&BarMonitorOverride::smartAutoHide, "smart_auto_hide"),
@@ -2264,6 +2271,7 @@ namespace noctalia::config::schema {
         optionalIntField(&BarMonitorOverride::padding, "padding"),
         optionalIntField(&BarMonitorOverride::widgetSpacing, "widget_spacing"),
         optionalFloatField(&BarMonitorOverride::scale, "scale", kBarScaleRange),
+        optionalFloatField(&BarMonitorOverride::fontScale, "font_scale", kBarFontScaleRange),
         optionalBoolField(&BarMonitorOverride::shadow, "shadow"),
         optionalBoolField(&BarMonitorOverride::contactShadow, "contact_shadow"),
         optionalIntField(&BarMonitorOverride::panelOverlap, "panel_overlap", kBarPanelOverlapRange),
