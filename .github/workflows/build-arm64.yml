@@ -28,7 +28,7 @@ jobs:
             image: fedora:44
             pkg_mgr: dnf
           - distro: arch
-            image: archlinux:latest
+            image: archlinux:latest-arm64  # Explicitly specify ARM64 tag
             pkg_mgr: pacman
     container:
       image: ${{ matrix.image }}
