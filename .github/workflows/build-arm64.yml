@@ -28,7 +28,7 @@ jobs:
             image: fedora:44
             pkg_mgr: dnf
           - distro: arch
-            image: agners/archlinuxarm:latest
+            image: lfdevs/archlinuxarm:base-devel
             pkg_mgr: pacman
     container:
       image: ${{ matrix.image }}
